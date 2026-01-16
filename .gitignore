@@ -1,0 +1,36 @@
+# Binaries
+gotube
+gomusic
+goviz
+gomusic-gui
+
+# Downloaded files
+*.mp4
+*.mp3
+*.m4a
+*.webm
+*.jpg
+*.png
+temp_*
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+go.work
+go.work.sum
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
