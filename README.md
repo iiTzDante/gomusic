@@ -1,78 +1,61 @@
 # GoMusic
 
-A fast terminal UI for downloading music from YouTube with automatic MP3 conversion and metadata tagging.
+A lightning-fast terminal UI for downloading and streaming music from YouTube with automatic MP3 conversion and metadata tagging.
 
 ## Features
 
-- 🔍 Fast YouTube Music search (5x concurrent workers)
-- 🎵 Audio-only downloads (prioritizes music over music videos)
-- 🎧 **Playback preview** (`p` key) - requires building from source with ALSA
-- 📝 Automatic ID3 tagging (title, artist, album art)
-- 🎨 Beautiful TUI with Bubble Tea
-- ⚡ High-quality MP3 conversion with FFmpeg
-- 🖼️ Embedded album artwork
+- ⚡ **Instant Search**: Lightweight, sub-second search without overhead.
+- 🎧 **Zero-Wait Streaming**: Start listening immediately with real-time audio streaming.
+- 🎵 **High-Quality Audio**: Automatic download and conversion to high-bitrate MP3.
+- 🎨 **Modern TUI**: Beautiful interface with rhythmic visualizers and smooth animations.
+- 📝 **Auto-Tagging**: Automatically embeds title, artist, and high-res album art into MP3s.
+- 🏹 **Enhanced Controls**: Responsive seeking, pause/resume, and smart navigation.
 
 ## Installation
 
+### Arch Linux (AUR)
 ```bash
-go install github.com/iiTzDante/gomusic@latest
+yay -S gomusic
 ```
 
-Or build from source:
-
+### From Source
 ```bash
 git clone https://github.com/iiTzDante/gomusic
 cd gomusic
-go build -o gomusic main.go
+go build -o gomusic .
 ```
 
 ## Requirements
 
-- Go 1.19 or later
-- FFmpeg (for MP3 conversion and tagging)
-- Chrome/Chromium (for YouTube scraping via Rod)
-- **ALSA** (Linux only, for playback feature when building from source)
+- **Go 1.22+** (for building from source)
+- **FFmpeg** (essential for transcoding and streaming)
+- **ALSA** (Linux only, required for integrated playback)
 
-> **Note**: Pre-built release binaries are download-only and do not include playback functionality. To use the integrated playback feature (`p` key), build from source on Linux with ALSA libraries installed (`libasound2-dev` on Debian/Ubuntu).
+## Controls
 
-## Usage
-
-```bash
-gomusic
-``` 
-
-Then:
-1. Enter song name, artist, or album
-2. Select from search results
-3. Wait for download and conversion
-4. Find your MP3 in the current directory
+| Key | Action |
+|-----|--------|
+| `Enter` | Search or Start Download |
+| `p` | Instant Playback Preview |
+| `Space` | Pause / Resume |
+| `Left` / `Right` | Seek Backward / Forward (5s) |
+| `s` | Stop Playback (Return to list) |
+| `q` | Return to list (Playing) / Quit (Menu) |
+| `Ctrl+C` | Force Quit |
 
 ## How It Works
 
-1. Searches YouTube Music using headless browser
-2. Fetches video metadata (title, artist, thumbnail)
-3. Downloads best available audio format
-4. Converts to MP3 with FFmpeg
-5. Embeds ID3 tags and cover art
-
-## Search Optimization
-
-The app appends " audio" to search queries to prioritize:
-- Official audio tracks
-- YouTube Music "Topic" channels
-- Audio-only uploads over music videos
+1.  **Fast Scrape**: Uses a lightweight HTTP scraper to find tracks instantly.
+2.  **Instant Stream**: Pipes a direct audio stream through FFmpeg for immediate playback.
+3.  **High-Speed Download**: Parallelized downloading and transcoding for local saves.
+4.  **Metadata Injection**: Fetches and embeds ID3 tags and cover art on the fly.
 
 ## Dependencies
 
-- [kkdai/youtube](https://github.com/kkdai/youtube) - YouTube video fetching
-- [PChaparro/go-youtube-scraper](https://github.com/PChaparro/go-youtube-scraper) - YouTube search
+- [kkdai/youtube](https://github.com/kkdai/youtube) - Stream/Video engine
+- [raitonoberu/ytsearch](https://github.com/raitonoberu/ytsearch) - High-speed search
+- [faiface/beep](https://github.com/faiface/beep) - Audio processing
 - [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) - TUI framework
-- [charmbracelet/lipgloss](https://github.com/charmbracelet/lipgloss) - Styling
-- [charmbracelet/bubbles](https://github.com/charmbracelet/bubbles) - TUI components
-
-## Environment Variables
-
-- `ROD_LOG=false` - Silences browser logs (automatically set)
 
 ## License
 
