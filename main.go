@@ -20,7 +20,7 @@ import (
 	"github.com/kkdai/youtube/v2"
 )
 
-const appVersion = "1.0.18"
+const appVersion = "1.0.19"
 
 // --- Styles ---
 
@@ -233,11 +233,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case " ":
-			m.togglePause()
-			return m, nil
+			if m.state == statePlaying {
+				m.togglePause()
+				return m, nil
+			}
 		case "s":
-			m.stopPlayback()
-			return m, nil
+			if m.state == statePlaying {
+				m.stopPlayback()
+				return m, nil
+			}
 		case "esc":
 			if m.state == stateSelecting {
 				m.state = stateInput
