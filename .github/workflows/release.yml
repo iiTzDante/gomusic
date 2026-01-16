@@ -24,11 +24,11 @@ jobs:
       - name: Build binaries (download-only, no playback)
         run: |
           # All platforms built with noplayback tag to exclude oto/ALSA dependencies
-          GOOS=linux GOARCH=amd64 go build -tags noplayback -o gomusic-linux-amd64 main.go
-          GOOS=linux GOARCH=arm64 go build -tags noplayback -o gomusic-linux-arm64 main.go
-          GOOS=darwin GOARCH=amd64 go build -tags noplayback -o gomusic-darwin-amd64 main.go
-          GOOS=darwin GOARCH=arm64 go build -tags noplayback -o gomusic-darwin-arm64 main.go
-          GOOS=windows GOARCH=amd64 go build -tags noplayback -o gomusic-windows-amd64.exe main.go
+          GOOS=linux GOARCH=amd64 go build -tags noplayback -o gomusic-linux-amd64 .
+          GOOS=linux GOARCH=arm64 go build -tags noplayback -o gomusic-linux-arm64 .
+          GOOS=darwin GOARCH=amd64 go build -tags noplayback -o gomusic-darwin-amd64 .
+          GOOS=darwin GOARCH=arm64 go build -tags noplayback -o gomusic-darwin-arm64 .
+          GOOS=windows GOARCH=amd64 go build -tags noplayback -o gomusic-windows-amd64.exe .
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
