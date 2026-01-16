@@ -158,3 +158,28 @@ func (m *model) seekBackward() {
 		}
 	}
 }
+
+// Get current playback position for lyrics synchronization
+func (m *model) getCurrentPlaybackPosition() (time.Duration, bool) {
+	if m.playback.player == nil {
+		return 0, false
+	}
+
+	ctrl, ok := m.playback.player.(*beep.Ctrl)
+	if !ok || ctrl == nil {
+		return 0, false
+	}
+
+	seeker, ok := ctrl.Streamer.(beep.StreamSeeker)
+	if !ok {
+		return 0, false
+	}
+
+	// Use speaker lock to safely read position without interfering with playback
+	speaker.Lock()
+	pos := seeker.Position()
+	speaker.Unlock()
+
+	currentTime := time.Duration(float64(pos) / 44100.0 * float64(time.Second))
+	return currentTime, true
+}
