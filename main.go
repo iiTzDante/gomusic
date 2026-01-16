@@ -20,7 +20,7 @@ import (
 	"github.com/raitonoberu/ytsearch"
 )
 
-const appVersion = "1.0.21"
+const appVersion = "1.0.22"
 
 // --- Styles ---
 
@@ -200,7 +200,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "q":
+		case "ctrl+c":
+			m.quitting = true
+			return m, tea.Quit
+		case "q":
+			if m.state == statePlaying {
+				m.stopPlayback()
+				m.state = stateSelecting
+				m.list.ResetSelected()
+				return m, nil
+			}
 			m.quitting = true
 			return m, tea.Quit
 		case "enter":
