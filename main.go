@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	youtubescraper "github.com/PChaparro/go-youtube-scraper"
 	"github.com/charmbracelet/bubbles/list"
@@ -15,6 +16,9 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/faiface/beep"
+	"github.com/faiface/beep/mp3"
+	"github.com/faiface/beep/speaker"
 	"github.com/kkdai/youtube/v2"
 )
 
@@ -54,6 +58,7 @@ const (
 	stateDownloading
 	stateConverting
 	stateFinished
+	statePlaying
 	stateError
 )
 
@@ -81,6 +86,11 @@ type model struct {
 	height    int
 	selected  songItem
 	program   *tea.Program
+
+	// Player state
+	playingSong string
+	isPaused    bool
+	ctrl        *beep.Ctrl
 }
 
 // --- Messages ---
@@ -95,6 +105,11 @@ type metadataFetchedMsg struct {
 	title  string
 	author string
 }
+type playMsg struct {
+	title  string
+	author string
+}
+type stopMsg struct{}
 
 // --- Logic ---
 
@@ -210,6 +225,63 @@ func (m *model) runDownloadConvert() {
 	m.program.Send(doneMsg(finalName))
 }
 
+func (m *model) runInternalPlayback(item songItem) {
+	client := youtube.Client{}
+	video, err := client.GetVideo(item.id)
+	if err != nil {
+		m.program.Send(errMsg(err))
+		return
+	}
+
+	formats := video.Formats.Type("audio")
+	if len(formats) == 0 {
+		m.program.Send(errMsg(fmt.Errorf("no audio format found")))
+		return
+	}
+	format := &formats[0]
+
+	stream, _, err := client.GetStream(video, format)
+	if err != nil {
+		m.program.Send(errMsg(err))
+		return
+	}
+
+	// Use a temp file because beep/mp3 needs a seeker
+	tmp, err := os.CreateTemp("", "gomusic-stream-*.mp3")
+	if err != nil {
+		m.program.Send(errMsg(err))
+		return
+	}
+	defer os.Remove(tmp.Name())
+
+	// Download in full for now to ensure seeking works
+	// Optimization: we could play while downloading but beep/mp3 is sensitive to EOF
+	_, err = io.Copy(tmp, stream)
+	if err != nil {
+		m.program.Send(errMsg(err))
+		return
+	}
+	tmp.Seek(0, 0)
+
+	streamer, _, err := mp3.Decode(tmp)
+	if err != nil {
+		m.program.Send(errMsg(err))
+		return
+	}
+	defer streamer.Close()
+
+	m.ctrl = &beep.Ctrl{Streamer: streamer, Paused: false}
+	m.program.Send(playMsg{title: video.Title, author: video.Author})
+
+	done := make(chan bool)
+	speaker.Play(beep.Seq(m.ctrl, beep.Callback(func() {
+		done <- true
+	})))
+
+	<-done
+	m.program.Send(stopMsg{})
+}
+
 func (m *model) downloadFile(client youtube.Client, format *youtube.Format, video *youtube.Video, path string, onProgress func(float64)) error {
 	stream, size, err := client.GetStream(video, format)
 	if err != nil {
@@ -286,40 +358,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			}
-		case "esc":
-			if m.state == stateSelecting {
-				m.state = stateInput
-				return m, nil
-			}
 		case "p":
 			if m.state == stateSelecting {
 				item, ok := m.list.SelectedItem().(songItem)
 				if ok {
-					url := "https://www.youtube.com/watch?v=" + item.id
-
-					// Prefer mpv, fallback to ffplay
-					player := "mpv"
-					args := []string{"--no-video", url}
-
-					if _, err := exec.LookPath("mpv"); err != nil {
-						if _, err := exec.LookPath("ffplay"); err == nil {
-							player = "ffplay"
-							args = []string{"-nodisp", "-autoexit", url}
-						} else {
-							m.err = fmt.Errorf("mpv or ffplay not found")
-							m.state = stateError
-							return m, nil
-						}
-					}
-
-					cmd := exec.Command(player, args...)
-					return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-						if err != nil {
-							return errMsg(err)
-						}
-						return nil
-					})
+					m.selected = item
+					m.state = stateSearching
+					go m.runInternalPlayback(item)
+					return m, m.spinner.Tick
 				}
+			}
+		case " ":
+			if m.ctrl != nil {
+				m.isPaused = !m.isPaused
+				m.ctrl.Paused = m.isPaused
+				return m, nil
+			}
+		case "s":
+			if m.ctrl != nil {
+				m.ctrl.Paused = true
+				m.ctrl = nil
+				return m, nil
+			}
+		case "esc":
+			if m.state == stateSelecting {
+				m.state = stateInput
+				return m, nil
 			}
 		}
 
@@ -429,6 +493,13 @@ func (m model) View() string {
 		)
 	case stateFinished:
 		s = fmt.Sprintf("\n  %s\n", titleStyle.Render("Success! Enjoy your music."))
+	case statePlaying:
+		s = fmt.Sprintf("\n  %s\n\n  %s %s\n\n  %s",
+			titleStyle.Render("Now Playing"),
+			m.spinner.View(),
+			statusStyle.Render(m.playingSong),
+			helpStyle.Render("SPACE: Play/Pause  •  S: Stop  •  Q: Exit"),
+		)
 	case stateError:
 		s = fmt.Sprintf("\n  %s\n\n  %v\n",
 			errorStyle.Render("Error"),
@@ -461,6 +532,10 @@ func main() {
 
 	program := tea.NewProgram(m)
 	m.program = program
+
+	// Init speaker once
+	sr := beep.SampleRate(44100)
+	speaker.Init(sr, sr.N(time.Second/10))
 
 	if _, err := program.Run(); err != nil {
 		fmt.Printf("Error running GoMusic: %v\n", err)
