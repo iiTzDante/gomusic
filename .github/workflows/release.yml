@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Build binaries
+        run: |
+          # Linux AMD64
+          GOOS=linux GOARCH=amd64 go build -o gomusic-linux-amd64 main.go
+          
+          # Linux ARM64
+          GOOS=linux GOARCH=arm64 go build -o gomusic-linux-arm64 main.go
+          
+          # macOS AMD64
+          GOOS=darwin GOARCH=amd64 go build -o gomusic-darwin-amd64 main.go
+          
+          # macOS ARM64 (Apple Silicon)
+          GOOS=darwin GOARCH=arm64 go build -o gomusic-darwin-arm64 main.go
+          
+          # Windows AMD64
+          GOOS=windows GOARCH=amd64 go build -o gomusic-windows-amd64.exe main.go
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            gomusic-linux-amd64
+            gomusic-linux-arm64
+            gomusic-darwin-amd64
+            gomusic-darwin-arm64
+            gomusic-windows-amd64.exe
+          body: |
+            ## GoMusic Release ${{ github.ref_name }}
+            
+            Download the binary for your platform:
+            - **Linux (x64)**: `gomusic-linux-amd64`
+            - **Linux (ARM64)**: `gomusic-linux-arm64`
+            - **macOS (Intel)**: `gomusic-darwin-amd64`
+            - **macOS (Apple Silicon)**: `gomusic-darwin-arm64`
+            - **Windows (x64)**: `gomusic-windows-amd64.exe`
+            
+            ### Installation
+            ```bash
+            # Linux/macOS
+            chmod +x gomusic-*
+            sudo mv gomusic-* /usr/local/bin/gomusic
+            
+            # Or use go install
+            go install github.com/iiTzDante/gomusic@${{ github.ref_name }}
+            ```
+            
+            ### Requirements
+            - FFmpeg (for MP3 conversion)
+            - Chrome/Chromium (for YouTube search)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
