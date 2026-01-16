@@ -17,6 +17,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/faiface/beep"
+	"github.com/faiface/beep/speaker"
 	"github.com/kkdai/youtube/v2"
 	"github.com/raitonoberu/ytsearch"
 )
@@ -468,7 +469,11 @@ func (m *model) updateLyrics() {
 		return
 	}
 
+	// Use speaker lock to safely read position without interfering with playback
+	speaker.Lock()
 	pos := seeker.Position()
+	speaker.Unlock()
+
 	currentTime := time.Duration(float64(pos) / 44100.0 * float64(time.Second))
 
 	// Find the current lyric index
