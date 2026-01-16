@@ -498,6 +498,16 @@ func (m *model) renderLyrics() string {
 	idx := m.playback.currentLyricIndex
 	var lines []string
 
+	// If no lyrics have started yet or no lyrics found
+	if idx < 0 || len(m.playback.lyrics) == 0 {
+		return ""
+	}
+
+	// If we've finished all lyrics, keep showing the last few lines
+	if idx >= len(m.playback.lyrics) {
+		idx = len(m.playback.lyrics) - 1
+	}
+
 	// Show 3 lines: previous, current (highlighted), next
 	for i := idx - 1; i <= idx+1; i++ {
 		if i < 0 || i >= len(m.playback.lyrics) {
