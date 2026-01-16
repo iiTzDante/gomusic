@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"time"
 
 	youtubescraper "github.com/PChaparro/go-youtube-scraper"
 	"github.com/charmbracelet/bubbles/list"
@@ -16,11 +15,10 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/faiface/beep"
-	"github.com/faiface/beep/mp3"
-	"github.com/faiface/beep/speaker"
 	"github.com/kkdai/youtube/v2"
 )
+
+const appVersion = "1.0.13"
 
 // --- Styles ---
 
@@ -47,81 +45,12 @@ var (
 	docStyle = lipgloss.NewStyle().Margin(1, 2)
 )
 
-// --- Types ---
-
-type state int
-
-const (
-	stateInput state = iota
-	stateSearching
-	stateSelecting
-	stateDownloading
-	stateConverting
-	stateFinished
-	statePlaying
-	stateError
-)
-
-type songItem struct {
-	id     string
-	title  string
-	author string
-	thumb  string
-}
-
-func (i songItem) Title() string       { return i.title }
-func (i songItem) Description() string { return i.author }
-func (i songItem) FilterValue() string { return i.title }
-
-type model struct {
-	state     state
-	textInput textinput.Model
-	list      list.Model
-	progress  progress.Model
-	spinner   spinner.Model
-	err       error
-	fileName  string
-	quitting  bool
-	width     int
-	height    int
-	selected  songItem
-	program   *tea.Program
-
-	// Player state
-	playingSong string
-	isPaused    bool
-	ctrl        *beep.Ctrl
-}
-
-// --- Messages ---
-
-type searchResultsMsg []songItem
-type errMsg error
-type downloadProgressMsg float64
-type convertMsg struct{}
-type doneMsg string
-type metadataFetchedMsg struct {
-	id     string
-	title  string
-	author string
-}
-type playMsg struct {
-	title  string
-	author string
-}
-type stopMsg struct{}
-
 // --- Logic ---
 
 func searchSongs(query string) tea.Cmd {
 	return func() tea.Msg {
-		// Silence rod logs
 		os.Setenv("ROD_LOG", "false")
-
-		// Append "audio" to prioritize music tracks over music videos
 		searchQuery := query + " audio"
-
-		// Get 10 videos, concurrency 5 for faster search, no API key
 		res, err := youtubescraper.GetVideosData("", searchQuery, 10, 5, false)
 		if err != nil {
 			return errMsg(err)
@@ -129,7 +58,6 @@ func searchSongs(query string) tea.Cmd {
 
 		var items []songItem
 		for _, v := range res.Videos {
-			// Extract ID from URL robustly
 			id := ""
 			if strings.Contains(v.Url, "v=") {
 				id = strings.Split(v.Url, "v=")[1]
@@ -157,7 +85,6 @@ func (m *model) runDownloadConvert() {
 		return
 	}
 
-	// Update metadata via message to be thread-safe
 	m.program.Send(metadataFetchedMsg{
 		id:     m.selected.id,
 		title:  video.Title,
@@ -169,13 +96,12 @@ func (m *model) runDownloadConvert() {
 		m.program.Send(errMsg(fmt.Errorf("no audio format found")))
 		return
 	}
-	format := &formats[0] // Best audio
+	format := &formats[0]
 
 	tempAudio := "temp_audio"
 	tempThumb := "temp_thumb.jpg"
 	finalName := strings.ReplaceAll(video.Title, "/", "_") + ".mp3"
 
-	// 1. Download Audio
 	err = m.downloadFile(client, format, video, tempAudio, func(p float64) {
 		m.program.Send(downloadProgressMsg(p))
 	})
@@ -184,17 +110,11 @@ func (m *model) runDownloadConvert() {
 		return
 	}
 
-	// 2. Download Thumbnail
-	m.program.Send(convertMsg{}) // Use this as "starting processing"
+	m.program.Send(convertMsg{})
 	err = m.downloadThumb(m.selected.thumb, tempThumb)
 	if err != nil {
-		// Log error but continue without thumb
 		fmt.Fprintf(os.Stderr, "Error downloading thumb: %v\n", err)
 	}
-
-	// 3. Convert and Tag with FFmpeg
-	// -i input -i thumb -map 0:0 -map 1:0 -c:a libmp3lame -q:a 2 -id3v2_version 3
-	// -metadata title="..." -metadata artist="..." -metadata album="..."
 
 	args := []string{
 		"-y",
@@ -218,68 +138,10 @@ func (m *model) runDownloadConvert() {
 		return
 	}
 
-	// Cleanup
 	os.Remove(tempAudio)
 	os.Remove(tempThumb)
 
 	m.program.Send(doneMsg(finalName))
-}
-
-func (m *model) runInternalPlayback(item songItem) {
-	client := youtube.Client{}
-	video, err := client.GetVideo(item.id)
-	if err != nil {
-		m.program.Send(errMsg(err))
-		return
-	}
-
-	formats := video.Formats.Type("audio")
-	if len(formats) == 0 {
-		m.program.Send(errMsg(fmt.Errorf("no audio format found")))
-		return
-	}
-	format := &formats[0]
-
-	stream, _, err := client.GetStream(video, format)
-	if err != nil {
-		m.program.Send(errMsg(err))
-		return
-	}
-
-	// Use a temp file because beep/mp3 needs a seeker
-	tmp, err := os.CreateTemp("", "gomusic-stream-*.mp3")
-	if err != nil {
-		m.program.Send(errMsg(err))
-		return
-	}
-	defer os.Remove(tmp.Name())
-
-	// Download in full for now to ensure seeking works
-	// Optimization: we could play while downloading but beep/mp3 is sensitive to EOF
-	_, err = io.Copy(tmp, stream)
-	if err != nil {
-		m.program.Send(errMsg(err))
-		return
-	}
-	tmp.Seek(0, 0)
-
-	streamer, _, err := mp3.Decode(tmp)
-	if err != nil {
-		m.program.Send(errMsg(err))
-		return
-	}
-	defer streamer.Close()
-
-	m.ctrl = &beep.Ctrl{Streamer: streamer, Paused: false}
-	m.program.Send(playMsg{title: video.Title, author: video.Author})
-
-	done := make(chan bool)
-	speaker.Play(beep.Seq(m.ctrl, beep.Callback(func() {
-		done <- true
-	})))
-
-	<-done
-	m.program.Send(stopMsg{})
 }
 
 func (m *model) downloadFile(client youtube.Client, format *youtube.Format, video *youtube.Video, path string, onProgress func(float64)) error {
@@ -369,17 +231,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case " ":
-			if m.ctrl != nil {
-				m.isPaused = !m.isPaused
-				m.ctrl.Paused = m.isPaused
-				return m, nil
-			}
+			m.togglePause()
+			return m, nil
 		case "s":
-			if m.ctrl != nil {
-				m.ctrl.Paused = true
-				m.ctrl = nil
-				return m, nil
-			}
+			m.stopPlayback()
+			return m, nil
 		case "esc":
 			if m.state == stateSelecting {
 				m.state = stateInput
@@ -429,6 +285,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tea.Printf("\n  %s %s\n", statusStyle.Render("Saved:"), m.fileName),
 			tea.Quit,
 		)
+
+	case playMsg:
+		m.playingSong = fmt.Sprintf("%s - %s", msg.title, msg.author)
+		m.state = statePlaying
+		return m, nil
+
+	case stopMsg:
+		m.state = stateSelecting
+		return m, nil
 
 	case progress.FrameMsg:
 		newModel, cmd := m.progress.Update(msg)
@@ -516,6 +381,11 @@ func (m model) View() string {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "-v" {
+		fmt.Printf("gomusic version %s\n", appVersion)
+		return
+	}
+
 	ti := textinput.New()
 	ti.Placeholder = "Song title..."
 	ti.Focus()
@@ -538,9 +408,7 @@ func main() {
 	program := tea.NewProgram(m)
 	m.program = program
 
-	// Init speaker once
-	sr := beep.SampleRate(44100)
-	speaker.Init(sr, sr.N(time.Second/10))
+	initSpeaker()
 
 	if _, err := program.Run(); err != nil {
 		fmt.Printf("Error running GoMusic: %v\n", err)
