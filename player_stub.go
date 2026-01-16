@@ -17,3 +17,11 @@ func (m *model) togglePause() {
 func (m *model) stopPlayback() {
 	// No-op
 }
+
+func (m *model) seekForward() {
+	// No-op
+}
+
+func (m *model) seekBackward() {
+	// No-op
+}

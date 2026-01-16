@@ -115,3 +115,31 @@ func (m *model) stopPlayback() {
 		m.playback.playingSong = ""
 	}
 }
+
+func (m *model) seekForward() {
+	if ctrl, ok := m.playback.player.(*beep.Ctrl); ok && ctrl != nil {
+		if seeker, ok := ctrl.Streamer.(beep.StreamSeeker); ok {
+			speaker.Lock()
+			newPos := seeker.Position() + 5*44100
+			if newPos >= seeker.Len() {
+				newPos = seeker.Len() - 1
+			}
+			seeker.Seek(newPos)
+			speaker.Unlock()
+		}
+	}
+}
+
+func (m *model) seekBackward() {
+	if ctrl, ok := m.playback.player.(*beep.Ctrl); ok && ctrl != nil {
+		if seeker, ok := ctrl.Streamer.(beep.StreamSeeker); ok {
+			speaker.Lock()
+			newPos := seeker.Position() - 5*44100
+			if newPos < 0 {
+				newPos = 0
+			}
+			seeker.Seek(newPos)
+			speaker.Unlock()
+		}
+	}
+}

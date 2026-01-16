@@ -20,7 +20,7 @@ import (
 	"github.com/kkdai/youtube/v2"
 )
 
-const appVersion = "1.0.17"
+const appVersion = "1.0.18"
 
 // --- Styles ---
 
@@ -242,6 +242,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == stateSelecting {
 				m.state = stateInput
 				return m, nil
+			}
+		case "right":
+			if m.state == statePlaying {
+				m.seekForward()
+			}
+		case "left":
+			if m.state == statePlaying {
+				m.seekBackward()
 			}
 		}
 
