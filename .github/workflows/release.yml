@@ -27,20 +27,20 @@ jobs:
 
       - name: Build binaries
         run: |
-          # Linux AMD64
-          GOOS=linux GOARCH=amd64 go build -o gomusic-linux-amd64 main.go
+          # Linux AMD64 (Requires ALSA, so CGO_ENABLED=1)
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -o gomusic-linux-amd64 main.go
           
-          # Linux ARM64
-          GOOS=linux GOARCH=arm64 go build -o gomusic-linux-arm64 main.go
+          # Linux ARM64 (Cross-compiling with ALSA is hard, trying CGO_ENABLED=0 first, if it fails we might need to skip or use a better runner)
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o gomusic-linux-arm64 main.go
           
-          # macOS AMD64
-          GOOS=darwin GOARCH=amd64 go build -o gomusic-darwin-amd64 main.go
+          # macOS AMD64 (CGO disabled for easy cross-build)
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o gomusic-darwin-amd64 main.go
           
-          # macOS ARM64 (Apple Silicon)
-          GOOS=darwin GOARCH=arm64 go build -o gomusic-darwin-arm64 main.go
+          # macOS ARM64 (Apple Silicon) (CGO disabled)
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o gomusic-darwin-arm64 main.go
           
-          # Windows AMD64
-          GOOS=windows GOARCH=amd64 go build -o gomusic-windows-amd64.exe main.go
+          # Windows AMD64 (CGO disabled)
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o gomusic-windows-amd64.exe main.go
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
