@@ -18,7 +18,7 @@ import (
 	"github.com/kkdai/youtube/v2"
 )
 
-const appVersion = "1.0.15"
+const appVersion = "1.0.16"
 
 // --- Styles ---
 

@@ -8,6 +8,8 @@ import (
 	"os"
 	"time"
 
+	"os/exec"
+
 	"github.com/faiface/beep"
 	"github.com/faiface/beep/mp3"
 	"github.com/faiface/beep/speaker"
@@ -40,21 +42,43 @@ func (m *model) runInternalPlayback(item songItem) {
 		return
 	}
 
-	tmp, err := os.CreateTemp("", "gomusic-stream-*.mp3")
+	tempRaw, err := os.CreateTemp("", "gomusic-raw-*.bin")
 	if err != nil {
 		m.program.Send(errMsg(err))
 		return
 	}
-	defer os.Remove(tmp.Name())
+	defer os.Remove(tempRaw.Name())
+	defer tempRaw.Close()
 
-	_, err = io.Copy(tmp, stream)
+	_, err = io.Copy(tempRaw, stream)
 	if err != nil {
 		m.program.Send(errMsg(err))
 		return
 	}
-	tmp.Seek(0, 0)
 
-	streamer, _, err := mp3.Decode(tmp)
+	tempMP3, err := os.CreateTemp("", "gomusic-stream-*.mp3")
+	if err != nil {
+		m.program.Send(errMsg(err))
+		return
+	}
+	tempMP3.Close() // ffmpeg will write to it
+	defer os.Remove(tempMP3.Name())
+
+	// Transcode to MP3 using ffmpeg
+	cmd := exec.Command("ffmpeg", "-y", "-i", tempRaw.Name(), "-vn", "-c:a", "libmp3lame", "-q:a", "2", tempMP3.Name())
+	if err := cmd.Run(); err != nil {
+		m.program.Send(errMsg(fmt.Errorf("transcoding failed: %v", err)))
+		return
+	}
+
+	f, err := os.Open(tempMP3.Name())
+	if err != nil {
+		m.program.Send(errMsg(err))
+		return
+	}
+	defer f.Close()
+
+	streamer, _, err := mp3.Decode(f)
 	if err != nil {
 		m.program.Send(errMsg(err))
 		return
