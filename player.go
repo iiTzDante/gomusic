@@ -86,7 +86,10 @@ func (m *model) runInternalPlayback(item songItem) {
 	defer streamer.Close()
 
 	ctrl := &beep.Ctrl{Streamer: streamer, Paused: false}
-	m.player = ctrl
+	m.playback.player = ctrl
+	m.playback.playingSong = video.Title
+	m.playback.isPaused = false
+
 	m.program.Send(playMsg{title: video.Title, author: video.Author})
 
 	done := make(chan bool)
@@ -99,15 +102,16 @@ func (m *model) runInternalPlayback(item songItem) {
 }
 
 func (m *model) togglePause() {
-	if ctrl, ok := m.player.(*beep.Ctrl); ok && ctrl != nil {
-		m.isPaused = !m.isPaused
-		ctrl.Paused = m.isPaused
+	if ctrl, ok := m.playback.player.(*beep.Ctrl); ok && ctrl != nil {
+		m.playback.isPaused = !m.playback.isPaused
+		ctrl.Paused = m.playback.isPaused
 	}
 }
 
 func (m *model) stopPlayback() {
-	if ctrl, ok := m.player.(*beep.Ctrl); ok && ctrl != nil {
+	if ctrl, ok := m.playback.player.(*beep.Ctrl); ok && ctrl != nil {
 		ctrl.Paused = true
-		m.player = nil
+		m.playback.player = nil
+		m.playback.playingSong = ""
 	}
 }

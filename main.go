@@ -3,10 +3,12 @@ package main
 import (
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	youtubescraper "github.com/PChaparro/go-youtube-scraper"
 	"github.com/charmbracelet/bubbles/list"
@@ -18,7 +20,7 @@ import (
 	"github.com/kkdai/youtube/v2"
 )
 
-const appVersion = "1.0.16"
+const appVersion = "1.0.17"
 
 // --- Styles ---
 
@@ -287,7 +289,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 
 	case playMsg:
-		m.playingSong = fmt.Sprintf("%s - %s", msg.title, msg.author)
+		m.playback.playingSong = fmt.Sprintf("%s - %s", msg.title, msg.author)
 		m.state = statePlaying
 		return m, nil
 
@@ -364,10 +366,22 @@ func (m model) View() string {
 	case stateFinished:
 		s = fmt.Sprintf("\n  %s\n", titleStyle.Render("Success! Enjoy your music."))
 	case statePlaying:
-		s = fmt.Sprintf("\n  %s\n\n  %s %s\n\n  %s",
+		// Simple rhythmic animation using braille bars
+		t := time.Now().UnixNano() / 1e8
+		bars := ""
+		for i := 0; i < 8; i++ {
+			h := int(math.Sin(float64(t+int64(i)))*3 + 4)
+			if m.playback.isPaused {
+				h = 1
+			}
+			bars += strings.Repeat("┃", h) + strings.Repeat(" ", 7-h)
+		}
+
+		s = fmt.Sprintf("\n  %s\n\n  %s %s\n\n  %s\n\n  %s",
 			titleStyle.Render("Now Playing"),
 			m.spinner.View(),
-			statusStyle.Render(m.playingSong),
+			statusStyle.Render(m.playback.playingSong),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Render(bars),
 			helpStyle.Render("SPACE: Play/Pause  •  S: Stop  •  Q: Exit"),
 		)
 	case stateError:
@@ -403,6 +417,7 @@ func main() {
 		textInput: ti,
 		spinner:   s,
 		progress:  p,
+		playback:  &playbackState{},
 	}
 
 	program := tea.NewProgram(m)

@@ -34,6 +34,12 @@ func (i songItem) Title() string       { return i.title }
 func (i songItem) Description() string { return i.author }
 func (i songItem) FilterValue() string { return i.title }
 
+type playbackState struct {
+	playingSong string
+	isPaused    bool
+	player      any // *beep.Ctrl when !noplayback
+}
+
 type model struct {
 	state     state
 	textInput textinput.Model
@@ -48,10 +54,8 @@ type model struct {
 	selected  songItem
 	program   *tea.Program
 
-	// Player state
-	playingSong string
-	isPaused    bool
-	player      any // *beep.Ctrl when !noplayback
+	// Shared playback state (pointer ensures updates are seen by all receivers)
+	playback *playbackState
 }
 
 // --- Messages ---
