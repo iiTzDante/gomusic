@@ -6,6 +6,7 @@ A fast terminal UI for downloading music from YouTube with automatic MP3 convers
 
 - 🔍 Fast YouTube Music search (5x concurrent workers)
 - 🎵 Audio-only downloads (prioritizes music over music videos)
+- 🎧 **Playback preview** (`p` key) - requires building from source with ALSA
 - 📝 Automatic ID3 tagging (title, artist, album art)
 - 🎨 Beautiful TUI with Bubble Tea
 - ⚡ High-quality MP3 conversion with FFmpeg
@@ -30,6 +31,9 @@ go build -o gomusic main.go
 - Go 1.19 or later
 - FFmpeg (for MP3 conversion and tagging)
 - Chrome/Chromium (for YouTube scraping via Rod)
+- **ALSA** (Linux only, for playback feature when building from source)
+
+> **Note**: Pre-built release binaries are download-only and do not include playback functionality. To use the integrated playback feature (`p` key), build from source on Linux with ALSA libraries installed (`libasound2-dev` on Debian/Ubuntu).
 
 ## Usage
 

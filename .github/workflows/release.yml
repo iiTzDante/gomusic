@@ -20,26 +20,15 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.21'
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev
 
-      - name: Build binaries
+      - name: Build binaries (download-only, no playback)
         run: |
-          # Linux AMD64 (Native build with CGO for ALSA support)
-          go build -o gomusic-linux-amd64 main.go
-          
-          # Linux ARM64 (CGO disabled - no audio playback on ARM64)
+          # All platforms built with CGO disabled for maximum portability
+          # Note: Playback feature (p key) only works when building from source with ALSA
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o gomusic-linux-amd64 main.go
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o gomusic-linux-arm64 main.go
-          
-          # macOS AMD64 (CGO disabled - no audio playback)
           CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o gomusic-darwin-amd64 main.go
-          
-          # macOS ARM64 (Apple Silicon) (CGO disabled - no audio playback)
           CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o gomusic-darwin-arm64 main.go
-          
-          # Windows AMD64 (CGO disabled - no audio playback)
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o gomusic-windows-amd64.exe main.go
 
       - name: Create Release
