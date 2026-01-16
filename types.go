@@ -39,6 +39,7 @@ type playbackState struct {
 	playingSong string
 	isPaused    bool
 	player      any // *beep.Ctrl when !noplayback
+	cmd         any // *exec.Cmd to kill the stream
 }
 
 type model struct {

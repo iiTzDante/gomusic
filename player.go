@@ -41,9 +41,19 @@ func (m *model) runInternalPlayback(item songItem) {
 		return
 	}
 
-	// Use ffmpeg to transcode the stream URL directly to mp3 and pipe to stdout
-	// -re is not needed here as we want to buffer as fast as possible
-	cmd := exec.Command("ffmpeg", "-i", streamURL, "-vn", "-c:a", "libmp3lame", "-f", "mp3", "pipe:1")
+	// Force 44.1kHz stereo to match the speaker exactly and avoid pitch/speed issues
+	// Use -probesize and -analyzeduration to minimize start delay
+	cmd := exec.Command("ffmpeg",
+		"-probesize", "32",
+		"-analyzeduration", "0",
+		"-i", streamURL,
+		"-vn", "-c:a", "libmp3lame",
+		"-ar", "44100",
+		"-ac", "2",
+		"-f", "mp3",
+		"pipe:1",
+	)
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		m.program.Send(errMsg(err))
@@ -54,6 +64,9 @@ func (m *model) runInternalPlayback(item songItem) {
 		m.program.Send(errMsg(err))
 		return
 	}
+
+	// Store cmd so we can kill it
+	m.playback.cmd = cmd
 
 	streamer, _, err := mp3.Decode(io.NopCloser(stdout))
 	if err != nil {
@@ -74,7 +87,7 @@ func (m *model) runInternalPlayback(item songItem) {
 		done <- true
 	})))
 
-	// Wait for playback to finish or be stopped
+	// Wait for playback to finish or the process to be killed
 	go func() {
 		cmd.Wait()
 	}()
@@ -91,11 +104,18 @@ func (m *model) togglePause() {
 }
 
 func (m *model) stopPlayback() {
+	// 1. Kill the ffmpeg process first
+	if cmd, ok := m.playback.cmd.(*exec.Cmd); ok && cmd != nil && cmd.Process != nil {
+		cmd.Process.Kill()
+		m.playback.cmd = nil
+	}
+
+	// 2. Stop the audio engine
 	if ctrl, ok := m.playback.player.(*beep.Ctrl); ok && ctrl != nil {
 		ctrl.Paused = true
 		m.playback.player = nil
-		m.playback.playingSong = ""
 	}
+	m.playback.playingSong = ""
 }
 
 func (m *model) seekForward() {
