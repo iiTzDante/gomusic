@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	youtubescraper "github.com/PChaparro/go-youtube-scraper"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -18,9 +17,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kkdai/youtube/v2"
+	"github.com/raitonoberu/ytsearch"
 )
 
-const appVersion = "1.0.20"
+const appVersion = "1.0.21"
 
 // --- Styles ---
 
@@ -51,28 +51,23 @@ var (
 
 func searchSongs(query string) tea.Cmd {
 	return func() tea.Msg {
-		os.Setenv("ROD_LOG", "false")
-		searchQuery := query + " audio"
-		res, err := youtubescraper.GetVideosData("", searchQuery, 10, 5, false)
+		search := ytsearch.VideoSearch(query + " audio")
+		result, err := search.Next()
 		if err != nil {
 			return errMsg(err)
 		}
 
 		var items []songItem
-		for _, v := range res.Videos {
-			id := ""
-			if strings.Contains(v.Url, "v=") {
-				id = strings.Split(v.Url, "v=")[1]
-				if strings.Contains(id, "&") {
-					id = strings.Split(id, "&")[0]
-				}
+		for _, v := range result.Videos {
+			thumb := ""
+			if len(v.Thumbnails) > 0 {
+				thumb = v.Thumbnails[0].URL
 			}
-
 			items = append(items, songItem{
-				id:     id,
+				id:     v.ID,
 				title:  v.Title,
-				author: "Searching for metadata...",
-				thumb:  v.Thumbnail,
+				author: v.Channel.Title,
+				thumb:  thumb,
 			})
 		}
 		return searchResultsMsg(items)
