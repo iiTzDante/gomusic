@@ -20,7 +20,7 @@ import (
 	"github.com/kkdai/youtube/v2"
 )
 
-const appVersion = "1.0.19"
+const appVersion = "1.0.20"
 
 // --- Styles ---
 
@@ -227,7 +227,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				item, ok := m.list.SelectedItem().(songItem)
 				if ok {
 					m.selected = item
-					m.state = stateSearching
+					m.state = stateLoading
 					go m.runInternalPlayback(item)
 					return m, m.spinner.Tick
 				}
@@ -307,6 +307,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case stopMsg:
 		m.state = stateSelecting
+		m.list.ResetSelected()
 		return m, nil
 
 	case progress.FrameMsg:
@@ -377,23 +378,37 @@ func (m model) View() string {
 		)
 	case stateFinished:
 		s = fmt.Sprintf("\n  %s\n", titleStyle.Render("Success! Enjoy your music."))
+	case stateLoading:
+		s = fmt.Sprintf("\n  %s %s\n", m.spinner.View(), titleStyle.Render("Preparing stream..."))
 	case statePlaying:
-		// Simple rhythmic animation using braille bars
-		t := time.Now().UnixNano() / 1e8
-		bars := ""
-		for i := 0; i < 8; i++ {
-			h := int(math.Sin(float64(t+int64(i)))*3 + 4)
+		// Enhanced rhythmic Braille wave animation
+		t := float64(time.Now().UnixNano()/1e7) / 10.0
+		wave := ""
+		width := 24
+		for i := 0; i < width; i++ {
+			p := float64(i) / float64(width)
+			h := math.Sin(p*math.Pi*2+t) * 3.5
 			if m.playback.isPaused {
-				h = 1
+				h = 0
 			}
-			bars += strings.Repeat("┃", h) + strings.Repeat(" ", 7-h)
+
+			// Select braille character based on height
+			chars := []string{"⡀", "⡄", "⡆", "⡇", "⣇", "⣧", "⣷", "⣿"}
+			idx := int(h + 3.5)
+			if idx < 0 {
+				idx = 0
+			}
+			if idx > 7 {
+				idx = 7
+			}
+			wave += chars[idx]
 		}
 
 		s = fmt.Sprintf("\n  %s\n\n  %s %s\n\n  %s\n\n  %s",
 			titleStyle.Render("Now Playing"),
 			m.spinner.View(),
 			statusStyle.Render(m.playback.playingSong),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Render(bars),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Render(wave),
 			helpStyle.Render("SPACE: Play/Pause  •  S: Stop  •  Q: Exit"),
 		)
 	case stateError:

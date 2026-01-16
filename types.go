@@ -19,6 +19,7 @@ const (
 	stateDownloading
 	stateConverting
 	stateFinished
+	stateLoading
 	statePlaying
 	stateError
 )
