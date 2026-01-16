@@ -20,7 +20,7 @@ import (
 	"github.com/raitonoberu/ytsearch"
 )
 
-const appVersion = "1.0.22"
+const appVersion = "1.0.23"
 
 // --- Styles ---
 

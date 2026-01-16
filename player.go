@@ -5,7 +5,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"os/exec"
@@ -36,49 +35,27 @@ func (m *model) runInternalPlayback(item songItem) {
 	}
 	format := &formats[0]
 
-	stream, _, err := client.GetStream(video, format)
+	streamURL, err := client.GetStreamURL(video, format)
 	if err != nil {
 		m.program.Send(errMsg(err))
 		return
 	}
 
-	tempRaw, err := os.CreateTemp("", "gomusic-raw-*.bin")
-	if err != nil {
-		m.program.Send(errMsg(err))
-		return
-	}
-	defer os.Remove(tempRaw.Name())
-	defer tempRaw.Close()
-
-	_, err = io.Copy(tempRaw, stream)
+	// Use ffmpeg to transcode the stream URL directly to mp3 and pipe to stdout
+	// -re is not needed here as we want to buffer as fast as possible
+	cmd := exec.Command("ffmpeg", "-i", streamURL, "-vn", "-c:a", "libmp3lame", "-f", "mp3", "pipe:1")
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		m.program.Send(errMsg(err))
 		return
 	}
 
-	tempMP3, err := os.CreateTemp("", "gomusic-stream-*.mp3")
-	if err != nil {
+	if err := cmd.Start(); err != nil {
 		m.program.Send(errMsg(err))
 		return
 	}
-	tempMP3.Close() // ffmpeg will write to it
-	defer os.Remove(tempMP3.Name())
 
-	// Transcode to MP3 using ffmpeg
-	cmd := exec.Command("ffmpeg", "-y", "-i", tempRaw.Name(), "-vn", "-c:a", "libmp3lame", "-q:a", "2", tempMP3.Name())
-	if err := cmd.Run(); err != nil {
-		m.program.Send(errMsg(fmt.Errorf("transcoding failed: %v", err)))
-		return
-	}
-
-	f, err := os.Open(tempMP3.Name())
-	if err != nil {
-		m.program.Send(errMsg(err))
-		return
-	}
-	defer f.Close()
-
-	streamer, _, err := mp3.Decode(f)
+	streamer, _, err := mp3.Decode(io.NopCloser(stdout))
 	if err != nil {
 		m.program.Send(errMsg(err))
 		return
@@ -96,6 +73,11 @@ func (m *model) runInternalPlayback(item songItem) {
 	speaker.Play(beep.Seq(ctrl, beep.Callback(func() {
 		done <- true
 	})))
+
+	// Wait for playback to finish or be stopped
+	go func() {
+		cmd.Wait()
+	}()
 
 	<-done
 	m.program.Send(stopMsg{})
