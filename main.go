@@ -126,7 +126,7 @@ func searchSongs(query string) tea.Cmd {
 			items = append(items, songItem{
 				id:     id,
 				title:  v.Title,
-				author: "Searching for metadata...",
+				author: v.Author,
 				thumb:  v.Thumbnail,
 			})
 		}
