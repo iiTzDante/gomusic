@@ -291,6 +291,36 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.state = stateInput
 				return m, nil
 			}
+		case "p":
+			if m.state == stateSelecting {
+				item, ok := m.list.SelectedItem().(songItem)
+				if ok {
+					url := "https://www.youtube.com/watch?v=" + item.id
+
+					// Prefer mpv, fallback to ffplay
+					player := "mpv"
+					args := []string{"--no-video", url}
+
+					if _, err := exec.LookPath("mpv"); err != nil {
+						if _, err := exec.LookPath("ffplay"); err == nil {
+							player = "ffplay"
+							args = []string{"-nodisp", "-autoexit", url}
+						} else {
+							m.err = fmt.Errorf("mpv or ffplay not found")
+							m.state = stateError
+							return m, nil
+						}
+					}
+
+					cmd := exec.Command(player, args...)
+					return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+						if err != nil {
+							return errMsg(err)
+						}
+						return nil
+					})
+				}
+			}
 		}
 
 	case spinner.TickMsg:
