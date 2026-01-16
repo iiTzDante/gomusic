@@ -478,7 +478,12 @@ func (m model) View() string {
 	case stateSearching:
 		s = fmt.Sprintf("\n  %s Searching YouTube Music...\n", m.spinner.View())
 	case stateSelecting:
-		s = docStyle.Render(m.list.View())
+		return docStyle.Render(
+			lipgloss.JoinVertical(lipgloss.Left,
+				m.list.View(),
+				helpStyle.Render("\n  ENTER: Download & Convert  •  P: Play Integrated  •  Q: Quit"),
+			),
+		)
 	case stateDownloading:
 		s = fmt.Sprintf("\n  %s\n\n  %s\n\n  %s",
 			titleStyle.Render("Downloading: "+m.selected.title),
