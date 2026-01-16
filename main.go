@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/faiface/beep"
 	"github.com/kkdai/youtube/v2"
 	"github.com/raitonoberu/ytsearch"
 )
@@ -210,6 +211,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.list.ResetSelected()
 				return m, nil
 			}
+			if m.state == stateSelecting {
+				m.state = stateInput
+				return m, nil
+			}
 			m.quitting = true
 			return m, tea.Quit
 		case "enter":
@@ -266,6 +271,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 
+	case lyricTickMsg:
+		if m.state == statePlaying {
+			m.updateLyrics()
+			return m, tea.Tick(time.Millisecond*200, func(t time.Time) tea.Msg {
+				return lyricTickMsg(t)
+			})
+		}
+		return m, nil
+
 	case searchResultsMsg:
 		m.state = stateSelecting
 		var items []list.Item
@@ -307,6 +321,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case playMsg:
 		m.playback.playingSong = fmt.Sprintf("%s - %s", msg.title, msg.author)
 		m.state = statePlaying
+		return m, tea.Batch(
+			m.spinner.Tick,
+			tea.Tick(time.Millisecond*200, func(t time.Time) tea.Msg {
+				return lyricTickMsg(t)
+			}),
+		)
+
+	case lyricsFetchedMsg:
+		m.playback.lyrics = msg
+		return m, nil
+
+	case noLyricsMsg:
+		m.playback.lyrics = []LyricLine{{Timestamp: 0, Text: "[No synced lyrics found]"}}
 		return m, nil
 
 	case stopMsg:
@@ -408,10 +435,11 @@ func (m model) View() string {
 			wave += chars[idx]
 		}
 
-		s = fmt.Sprintf("\n  %s\n\n  %s %s\n\n  %s\n\n  %s",
+		s = fmt.Sprintf("\n  %s\n\n  %s %s\n\n%s\n\n  %s\n\n  %s",
 			titleStyle.Render("Now Playing"),
 			m.spinner.View(),
 			statusStyle.Render(m.playback.playingSong),
+			m.renderLyrics(),
 			lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Render(wave),
 			helpStyle.Render("SPACE: Play/Pause  •  S: Stop  •  Q: Exit"),
 		)
@@ -423,6 +451,72 @@ func (m model) View() string {
 	}
 
 	return s
+}
+
+func (m *model) updateLyrics() {
+	if m.playback.player == nil || len(m.playback.lyrics) == 0 {
+		return
+	}
+
+	ctrl, ok := m.playback.player.(*beep.Ctrl)
+	if !ok || ctrl == nil {
+		return
+	}
+
+	seeker, ok := ctrl.Streamer.(beep.StreamSeeker)
+	if !ok {
+		return
+	}
+
+	pos := seeker.Position()
+	currentTime := time.Duration(float64(pos) / 44100.0 * float64(time.Second))
+
+	// Find the current lyric index
+	newIdx := -1
+	for i, l := range m.playback.lyrics {
+		if l.Timestamp <= currentTime {
+			newIdx = i
+		} else {
+			break
+		}
+	}
+	m.playback.currentLyricIndex = newIdx
+}
+
+func (m *model) renderLyrics() string {
+	if m.playback.lyrics == nil {
+		if m.playback.playingSong != "" {
+			return "\n  " + helpStyle.Render("Searching for lyrics...")
+		}
+		return ""
+	}
+
+	if len(m.playback.lyrics) == 1 && m.playback.lyrics[0].Text == "[No synced lyrics found]" {
+		return "\n  " + helpStyle.Render("No synced lyrics found for this track.")
+	}
+
+	idx := m.playback.currentLyricIndex
+	var lines []string
+
+	// Show 3 lines: previous, current (highlighted), next
+	for i := idx - 1; i <= idx+1; i++ {
+		if i < 0 || i >= len(m.playback.lyrics) {
+			lines = append(lines, "")
+			continue
+		}
+
+		text := m.playback.lyrics[i].Text
+		if i == idx {
+			lines = append(lines, "  "+lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#00FFFF")).
+				Bold(true).
+				Render("> "+text))
+		} else {
+			lines = append(lines, "    "+helpStyle.Render(text))
+		}
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 func main() {
