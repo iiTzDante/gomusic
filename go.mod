@@ -1,4 +1,4 @@
-module github.com/cesario/gomusic
+module github.com/iiTzDante/gomusic
 
 go 1.25.5
 
