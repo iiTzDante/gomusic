@@ -20,7 +20,7 @@ import (
 	"github.com/raitonoberu/ytsearch"
 )
 
-const appVersion = "1.0.28"
+const appVersion = "1.0.29"
 
 // --- Styles ---
 
@@ -234,6 +234,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == stateSelecting {
 				item, ok := m.list.SelectedItem().(songItem)
 				if ok {
+					m.stopPlayback() // Cleanup any existing playback first
 					m.selected = item
 					m.state = stateLoading
 					go m.runInternalPlayback(item)
@@ -273,7 +274,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case lyricTickMsg:
 		if m.state == statePlaying {
 			m.updateLyrics()
-			return m, tea.Tick(time.Second, func(t time.Time) tea.Msg {
+			return m, tea.Tick(time.Millisecond*200, func(t time.Time) tea.Msg {
 				return lyricTickMsg(t)
 			})
 		}

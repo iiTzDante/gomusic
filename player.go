@@ -41,11 +41,12 @@ func (m *model) runInternalPlayback(item songItem) {
 		return
 	}
 
-	// Force 44.1kHz stereo to match the speaker exactly and avoid pitch/speed issues
-	// Use -probesize and -analyzeduration to minimize start delay
+	// Use larger probesize and analyzeduration for better stream detection
+	// Add user agent to prevent YouTube from throttling or closing the connection
 	cmd := exec.Command("ffmpeg",
-		"-probesize", "32",
-		"-analyzeduration", "0",
+		"-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+		"-probesize", "10000000",
+		"-analyzeduration", "10000000",
 		"-i", streamURL,
 		"-vn", "-c:a", "libmp3lame",
 		"-ar", "44100",
