@@ -75,6 +75,15 @@ func (m *model) runInternalPlayback(item songItem) {
 	}
 	defer streamer.Close()
 
+	ctrl := &beep.Ctrl{Streamer: streamer, Paused: false}
+	m.playback.player = ctrl
+	m.playback.playingSong = video.Title
+	m.playback.isPaused = false
+	m.playback.lyrics = nil
+	m.playback.currentLyricIndex = -1
+
+	m.program.Send(playMsg{title: video.Title, author: video.Author})
+
 	// Fetch lyrics in background
 	go func() {
 		durSeconds := int(video.Duration.Seconds())
@@ -85,15 +94,6 @@ func (m *model) runInternalPlayback(item songItem) {
 			m.program.Send(lyricsFetchedMsg(lyrics))
 		}
 	}()
-
-	ctrl := &beep.Ctrl{Streamer: streamer, Paused: false}
-	m.playback.player = ctrl
-	m.playback.playingSong = video.Title
-	m.playback.isPaused = false
-	m.playback.lyrics = nil
-	m.playback.currentLyricIndex = -1
-
-	m.program.Send(playMsg{title: video.Title, author: video.Author})
 
 	done := make(chan bool)
 	speaker.Play(beep.Seq(ctrl, beep.Callback(func() {

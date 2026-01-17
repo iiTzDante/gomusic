@@ -64,7 +64,7 @@ func tryFetch(title, artist string, duration int) ([]LyricLine, error) {
 		params.Add("duration", strconv.Itoa(duration))
 	}
 
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := &http.Client{Timeout: 7 * time.Second}
 	resp, err := client.Get(baseURL + "?" + params.Encode())
 	if err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func trySearch(query string) ([]LyricLine, error) {
 	params := url.Values{}
 	params.Add("q", query)
 
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := &http.Client{Timeout: 7 * time.Second}
 	resp, err := client.Get(baseURL + "?" + params.Encode())
 	if err != nil {
 		return nil, err

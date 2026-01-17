@@ -273,7 +273,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case lyricTickMsg:
 		if m.state == statePlaying {
 			m.updateLyrics()
-			return m, tea.Tick(time.Millisecond*200, func(t time.Time) tea.Msg {
+			return m, tea.Tick(time.Second, func(t time.Time) tea.Msg {
 				return lyricTickMsg(t)
 			})
 		}
@@ -411,20 +411,18 @@ func (m model) View() string {
 	case stateLoading:
 		s = fmt.Sprintf("\n  %s %s\n", m.spinner.View(), titleStyle.Render("Preparing stream..."))
 	case statePlaying:
-		// Enhanced rhythmic Braille wave animation
+		// Simple animated wave visualizer
 		t := float64(time.Now().UnixNano()/1e7) / 10.0
 		wave := ""
-		width := 24
+		width := 60
+		chars := []string{"▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"}
 		for i := 0; i < width; i++ {
 			p := float64(i) / float64(width)
-			h := math.Sin(p*math.Pi*2+t) * 3.5
+			h := math.Sin(p*math.Pi*2+t)*2.5 + math.Sin(p*math.Pi*4+t*1.5)*1.5 + math.Sin(p*math.Pi*8+t*2.5)*0.8
 			if m.playback.isPaused {
 				h = 0
 			}
-
-			// Select braille character based on height
-			chars := []string{"⡀", "⡄", "⡆", "⡇", "⣇", "⣧", "⣷", "⣿"}
-			idx := int(h + 3.5)
+			idx := int((h + 4.8) / 9.6 * 8)
 			if idx < 0 {
 				idx = 0
 			}
@@ -433,10 +431,9 @@ func (m model) View() string {
 			}
 			wave += chars[idx]
 		}
-
-		s = fmt.Sprintf("\n  %s\n\n  %s %s\n\n%s\n\n  %s\n\n  %s",
+		s = fmt.Sprintf(
+			"\n  %s\n\n  %s\n\n%s\n\n  %s\n\n  %s",
 			titleStyle.Render("Now Playing"),
-			m.spinner.View(),
 			statusStyle.Render(m.playback.playingSong),
 			m.renderLyrics(),
 			lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Render(wave),

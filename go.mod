@@ -43,4 +43,5 @@ require (
 	golang.org/x/mobile v0.0.0-20251209145715-2553ed8ce294 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
+	gonum.org/v1/gonum v0.17.0 // indirect
 )
