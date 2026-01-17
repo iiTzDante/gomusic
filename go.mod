@@ -8,7 +8,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/faiface/beep v1.1.0
 	github.com/kkdai/youtube/v2 v2.10.5
-	github.com/raitonoberu/ytsearch v0.2.0
+	github.com/raitonoberu/ytmusic v0.0.0-20240324143733-0e5780514b1d
 )
 
 require (
@@ -43,5 +43,4 @@ require (
 	golang.org/x/mobile v0.0.0-20251209145715-2553ed8ce294 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	golang.org/x/text v0.33.0 // indirect
-	gonum.org/v1/gonum v0.17.0 // indirect
 )

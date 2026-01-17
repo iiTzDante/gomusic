@@ -1,9 +1,12 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
+	"image"
+	"image/jpeg"
+	"image/png"
 	"io"
-	"math"
 	"net/http"
 	"os"
 	"os/exec"
@@ -17,10 +20,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kkdai/youtube/v2"
-	"github.com/raitonoberu/ytsearch"
 )
 
-const appVersion = "1.0.31"
+const appVersion = "1.1.0"
 
 // --- Styles ---
 
@@ -49,174 +51,278 @@ var (
 
 // --- Logic ---
 
-func searchSongs(query string, filter searchFilter) tea.Cmd {
-	return func() tea.Msg {
-		var items []songItem
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
 
-		// Search for videos (songs) if filter allows
-		if filter == filterAll || filter == filterSongs {
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						// Silently recover from panics in video search
-					}
-				}()
-				// Prioritize music searches - try music-specific queries first
-				searchQueries := []string{
-					query + " music",
-					query + " song",
-					query + " audio",
-					query,
-				}
-				
-				for _, searchQuery := range searchQueries {
-					search := ytsearch.VideoSearch(searchQuery)
-					result, err := search.Next()
-					if err == nil && len(result.Videos) > 0 {
-						for _, v := range result.Videos {
-							// Prefer music-related results
-							titleLower := strings.ToLower(v.Title)
-							
-							// Skip if it's clearly not music (optional filter)
-							if strings.Contains(titleLower, "tutorial") || 
-							   strings.Contains(titleLower, "how to") ||
-							   strings.Contains(titleLower, "review") {
-								continue
-							}
-							
-							thumb := ""
-							if len(v.Thumbnails) > 0 {
-								thumb = v.Thumbnails[0].URL
-							}
-							items = append(items, songItem{
-								id:        v.ID,
-								title:     v.Title,
-								author:    v.Channel.Title,
-								thumb:     thumb,
-								isAlbum:   false,
-								trackCount: 0,
-							})
-						}
-						// If we found results, don't try other queries
-						if len(items) > 0 {
-							break
-						}
-					}
-				}
-			}()
-		}
+// isKittyTerminal checks if we're running in Kitty terminal
+func isKittyTerminal() bool {
+	return os.Getenv("TERM") == "xterm-kitty" || os.Getenv("KITTY_WINDOW_ID") != ""
+}
 
-		// Search for playlists (albums) if filter allows
-		if filter == filterAll || filter == filterAlbums {
-			// Try multiple query variations to find playlists
-			// Prioritize music-specific searches to target YouTube Music content
-			queryVariations := []string{
-				query + " music album",
-				query + " album music",
-				query + " music playlist",
-				query + " official album",
-				query + " full album music",
-				query + " album",
-				query + " playlist",
-				query + " full album",
-			}
-			
-			seenPlaylistIDs := make(map[string]bool)
-			foundPlaylists := false
-			
-			for _, searchQuery := range queryVariations {
-				func() {
-					defer func() {
-						if r := recover(); r != nil {
-							// Silently recover from panics in playlist search
-						}
-					}()
-					playlistSearch := ytsearch.PlaylistSearch(searchQuery)
-					playlistResult, err := playlistSearch.Next()
-					if err == nil && playlistResult != nil && len(playlistResult.Playlists) > 0 {
-						foundPlaylists = true
-						for _, p := range playlistResult.Playlists {
-							// Validate playlist ID - must start with "PL" or be a valid playlist format
-							// Video IDs are typically 11 chars and don't start with PL
-							if !isValidPlaylistID(p.ID) {
-								continue // Skip invalid playlist IDs
-							}
-							
-							// Skip if we've already added this playlist
-							if seenPlaylistIDs[p.ID] {
-								continue
-							}
-							seenPlaylistIDs[p.ID] = true
-							
-							thumb := ""
-							if len(p.Thumbnails) > 0 {
-								thumb = p.Thumbnails[0].URL
-							}
-							items = append(items, songItem{
-								id:         p.ID,
-								title:      p.Title,
-								author:     p.Channel.Title,
-								thumb:      thumb,
-								isAlbum:    true,
-								trackCount: p.VideoCount,
-							})
-						}
-					}
-				}()
-				
-				// If we found some results, don't try more variations
-				if foundPlaylists {
-					break
-				}
-			}
-			
-			// Fallback: If no playlists found, search for videos with "full album" or "playlist" in title
-			// and treat them as potential albums (they might be playlist links)
-			if !foundPlaylists {
-				func() {
-					defer func() {
-						if r := recover(); r != nil {
-							// Silently recover from panics
-						}
-					}()
-					// Search for videos that might be full albums
-					albumVideoSearch := ytsearch.VideoSearch(query + " full album")
-					albumVideoResult, err := albumVideoSearch.Next()
-					if err == nil && albumVideoResult != nil {
-						for _, v := range albumVideoResult.Videos {
-							titleLower := strings.ToLower(v.Title)
-							// Check if title suggests it's a full album or playlist
-							if strings.Contains(titleLower, "full album") || 
-							   strings.Contains(titleLower, "complete album") ||
-							   strings.Contains(titleLower, "playlist") {
-								thumb := ""
-								if len(v.Thumbnails) > 0 {
-									thumb = v.Thumbnails[0].URL
-								}
-								// Note: These are videos, not playlists, so trackCount will be 0
-								// But we'll mark them as albums so users can download them
-								items = append(items, songItem{
-									id:         v.ID,
-									title:      v.Title,
-									author:     v.Channel.Title,
-									thumb:      thumb,
-									isAlbum:    true,
-									trackCount: 0, // Unknown for video-based "albums"
-								})
-							}
-						}
-					}
-				}()
-			}
-		}
+// isImageCapableTerminal checks if the terminal supports image display
+func isImageCapableTerminal() bool {
+	// Check for Kitty
+	if isKittyTerminal() {
+		return true
+	}
+	
+	// Check for iTerm2
+	if strings.Contains(os.Getenv("TERM_PROGRAM"), "iTerm") {
+		return true
+	}
+	
+	// Check for WezTerm
+	if os.Getenv("TERM_PROGRAM") == "WezTerm" {
+		return true
+	}
+	
+	return false
+}
 
-		return searchResultsMsg(items)
+// displayKittyImageDirect displays an image directly to the terminal, bypassing TUI
+func displayKittyImageDirect(imagePath string) {
+	if !isKittyTerminal() {
+		return
+	}
+
+	// Use kitten icat to display the image on the left with specific positioning
+	cmd := exec.Command("kitten", "icat", 
+		"--place", "20x10@0x0", // 20 columns x 10 rows at position 0,0 (top-left)
+		"--engine", "builtin",
+		imagePath,
+	)
+	
+	// Allow output to show the image
+	cmd.Stdout = os.Stdout
+	err := cmd.Run()
+	
+	if err != nil {
+		// Try without positioning if place fails
+		cmd = exec.Command("kitten", "icat", 
+			"--align", "left",
+			imagePath,
+		)
+		cmd.Stdout = os.Stdout
+		cmd.Run()
 	}
 }
 
+// clearKittyImages clears all images from the terminal
+func clearKittyImages() {
+	if !isKittyTerminal() {
+		return
+	}
+
+	// Use kitten icat --clear to remove all images
+	cmd := exec.Command("kitten", "icat", "--clear")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Run()
+}
+
+// displayKittyImage displays an image using kitten icat
+func displayKittyImage(imagePath string, width, height int) string {
+	if !isKittyTerminal() {
+		return ""
+	}
+
+	// Use kitten icat with stream transfer mode to get the escape sequences
+	// This should work better with TUI applications
+	cmd := exec.Command("kitten", "icat", 
+		"--transfer-mode", "stream",
+		"--align", "left",
+		imagePath,
+	)
+	
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	
+	return string(output)
+}
+
+// displayITermImage displays an image using iTerm2's image protocol
+func displayITermImage(imagePath string) string {
+	if !strings.Contains(os.Getenv("TERM_PROGRAM"), "iTerm") {
+		return ""
+	}
+
+	// Read the image file
+	imageData, err := os.ReadFile(imagePath)
+	if err != nil {
+		return ""
+	}
+
+	// Encode to base64
+	encoded := base64.StdEncoding.EncodeToString(imageData)
+
+	// iTerm2 image protocol: \033]1337;File=inline=1:<base64_data>\007
+	itermSequence := fmt.Sprintf("\033]1337;File=inline=1:%s\007", encoded)
+	
+	return itermSequence
+}
+
+// displayTerminalImage displays an image using the appropriate terminal protocol
+func displayTerminalImage(imagePath string, width, height int) string {
+	termProgram := os.Getenv("TERM_PROGRAM")
+	
+	if isKittyTerminal() || termProgram == "kiro" {
+		// Try Kitty protocol for both Kitty and Kiro terminals
+		return displayKittyImage(imagePath, width, height)
+	} else if strings.Contains(termProgram, "iTerm") {
+		return displayITermImage(imagePath)
+	}
+	return ""
+}
+
+// resizeImage resizes an image to fit within the specified dimensions while maintaining aspect ratio
+func resizeImage(inputPath, outputPath string, maxWidth, maxHeight int) error {
+	// Use ffmpeg first (more reliable for various formats)
+	cmd := exec.Command("ffmpeg", 
+		"-i", inputPath,
+		"-vf", fmt.Sprintf("scale='min(%d,iw)':'min(%d,ih)':force_original_aspect_ratio=decrease", maxWidth, maxHeight),
+		"-q:v", "2", // High quality
+		"-y", // Overwrite output file
+		outputPath,
+	)
+	
+	// Suppress ffmpeg output
+	cmd.Stderr = nil
+	cmd.Stdout = nil
+	
+	err := cmd.Run()
+	if err != nil {
+		// Fallback to ImageMagick if ffmpeg fails
+		cmd = exec.Command("convert", inputPath, 
+			"-resize", fmt.Sprintf("%dx%d>", maxWidth, maxHeight),
+			"-quality", "95", // High quality
+			outputPath,
+		)
+		cmd.Stderr = nil
+		cmd.Stdout = nil
+		return cmd.Run()
+	}
+	
+	return nil
+}
+
+// convertImageToASCII converts an image to colored ASCII art with improved quality
+func convertImageToASCII(imagePath string, width, height int) string {
+	file, err := os.Open(imagePath)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+
+	// Decode image
+	var img image.Image
+	if strings.HasSuffix(strings.ToLower(imagePath), ".jpg") || strings.HasSuffix(strings.ToLower(imagePath), ".jpeg") {
+		img, err = jpeg.Decode(file)
+	} else if strings.HasSuffix(strings.ToLower(imagePath), ".png") {
+		img, err = png.Decode(file)
+	} else {
+		// Try to decode as any supported format
+		img, _, err = image.Decode(file)
+	}
+	
+	if err != nil {
+		return ""
+	}
+
+	bounds := img.Bounds()
+	imgWidth := bounds.Max.X - bounds.Min.X
+	imgHeight := bounds.Max.Y - bounds.Min.Y
+
+	// Calculate scaling factors
+	scaleX := float64(imgWidth) / float64(width)
+	scaleY := float64(imgHeight) / float64(height)
+
+	// Enhanced ASCII characters with better gradation
+	chars := []rune{' ', '░', '▒', '▓', '█'}
+	
+	var result strings.Builder
+	
+	for y := 0; y < height; y++ {
+		for x := 0; x < width; x++ {
+			// Sample pixel from original image
+			srcX := int(float64(x) * scaleX)
+			srcY := int(float64(y) * scaleY)
+			
+			if srcX >= imgWidth {
+				srcX = imgWidth - 1
+			}
+			if srcY >= imgHeight {
+				srcY = imgHeight - 1
+			}
+			
+			pixel := img.At(bounds.Min.X+srcX, bounds.Min.Y+srcY)
+			r, g, b, _ := pixel.RGBA()
+			
+			// Convert to 8-bit RGB values
+			r8 := uint8(r >> 8)
+			g8 := uint8(g >> 8)
+			b8 := uint8(b >> 8)
+			
+			// Convert to grayscale for character selection
+			gray := (r*299 + g*587 + b*114) / 1000
+			
+			// Map to character index
+			charIndex := int(float64(gray) / 65535.0 * float64(len(chars)-1))
+			if charIndex >= len(chars) {
+				charIndex = len(chars) - 1
+			}
+			
+			// Create colored character using ANSI escape codes
+			char := chars[charIndex]
+			if char != ' ' {
+				// Use RGB color for the character
+				coloredChar := fmt.Sprintf("\033[38;2;%d;%d;%dm%c\033[0m", r8, g8, b8, char)
+				result.WriteString(coloredChar)
+			} else {
+				result.WriteRune(char)
+			}
+		}
+		if y < height-1 {
+			result.WriteRune('\n')
+		}
+	}
+	
+	return result.String()
+}
+
+// downloadAndCacheThumb downloads and caches a thumbnail for display
+func (m *model) downloadAndCacheThumb(url, path string) error {
+	// Check if file already exists
+	if _, err := os.Stat(path); err == nil {
+		return nil // File already exists
+	}
+	
+	return m.downloadThumb(url, path)
+}
+
+func searchSongs(query string, filter searchFilter) tea.Cmd {
+	return searchYTMusic(query, filter)
+}
+
+func fetchAlbumTracks(browseID string) tea.Cmd {
+	return fetchYTMusicAlbumTracks(browseID)
+}
+
 func (m *model) runDownloadConvert() {
+	// Validate track ID before attempting download
+	if m.selected.id == "" || len(m.selected.id) < 10 {
+		m.program.Send(errMsg(fmt.Errorf("cannot download this track - invalid track ID")))
+		return
+	}
+
 	client := youtube.Client{}
-	video, err := client.GetVideo(m.selected.id)
+	track, err := client.GetVideo(m.selected.id) // GetVideo works for music tracks too
 	if err != nil {
 		m.program.Send(errMsg(err))
 		return
@@ -224,11 +330,11 @@ func (m *model) runDownloadConvert() {
 
 	m.program.Send(metadataFetchedMsg{
 		id:     m.selected.id,
-		title:  video.Title,
-		author: video.Author,
+		title:  track.Title,
+		author: track.Author,
 	})
 
-	formats := video.Formats.Type("audio")
+	formats := track.Formats.Type("audio")
 	if len(formats) == 0 {
 		m.program.Send(errMsg(fmt.Errorf("no audio format found")))
 		return
@@ -237,9 +343,9 @@ func (m *model) runDownloadConvert() {
 
 	tempAudio := "temp_audio"
 	tempThumb := "temp_thumb.jpg"
-	finalName := strings.ReplaceAll(video.Title, "/", "_") + ".mp3"
+	finalName := strings.ReplaceAll(track.Title, "/", "_") + ".mp3"
 
-	err = m.downloadFile(client, format, video, tempAudio, func(p float64) {
+	err = m.downloadFile(client, format, track, tempAudio, func(p float64) {
 		m.program.Send(downloadProgressMsg(p))
 	})
 	if err != nil {
@@ -250,7 +356,7 @@ func (m *model) runDownloadConvert() {
 	m.program.Send(convertMsg{})
 	err = m.downloadThumb(m.selected.thumb, tempThumb)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error downloading thumb: %v\n", err)
+		// Silently continue if thumb download fails
 	}
 
 	args := []string{
@@ -264,8 +370,8 @@ func (m *model) runDownloadConvert() {
 		"-id3v2_version", "3",
 		"-metadata:s:v", "title=\"Album cover\"",
 		"-metadata:s:v", "comment=\"Cover (Front)\"",
-		"-metadata", "title=" + video.Title,
-		"-metadata", "artist=" + video.Author,
+		"-metadata", "title=" + track.Title,
+		"-metadata", "artist=" + track.Author,
 		finalName,
 	}
 
@@ -330,137 +436,90 @@ func (m *model) downloadThumb(url, path string) error {
 	return err
 }
 
-// isValidPlaylistID checks if an ID is a valid YouTube playlist ID
-// Playlist IDs typically start with "PL" and are longer than video IDs
-func isValidPlaylistID(id string) bool {
-	if id == "" {
-		return false
-	}
-	// Playlist IDs usually start with "PL" or "RD" (radio playlists) or "OL" (official playlists)
-	// Video IDs are 11 characters and don't start with these prefixes
-	if strings.HasPrefix(id, "PL") || strings.HasPrefix(id, "RD") || strings.HasPrefix(id, "OL") {
-		return true
-	}
-	// If it's longer than 11 chars, it might be a playlist ID
-	if len(id) > 11 {
-		return true
-	}
-	// If it's exactly 11 chars and doesn't start with PL/RD/OL, it's likely a video ID
-	if len(id) == 11 {
-		return false
-	}
-	// For other lengths, be more permissive but check if it looks like a playlist
-	return len(id) >= 13 // Playlist IDs are usually at least 13 characters
-}
-
-func fetchAlbumTracks(playlistID string) tea.Cmd {
-	return func() tea.Msg {
-		// Validate playlist ID first
-		if !isValidPlaylistID(playlistID) {
-			return errMsg(fmt.Errorf("invalid playlist ID: %s (expected playlist ID starting with PL, RD, or OL)", playlistID))
-		}
-		
-		client := youtube.Client{}
-		// GetPlaylist expects a URL, so construct it from the playlist ID
-		// Handle both URL and ID formats
-		var playlistURL string
-		if strings.HasPrefix(playlistID, "http") {
-			playlistURL = playlistID
-		} else {
-			// It's a playlist ID
-			playlistURL = "https://www.youtube.com/playlist?list=" + playlistID
-		}
-		
-		playlist, err := client.GetPlaylist(playlistURL)
-		if err != nil {
-			return errMsg(fmt.Errorf("failed to fetch playlist: %v (URL: %s)", err, playlistURL))
-		}
-
-		var tracks []songItem
-		for _, entry := range playlist.Videos {
-			thumb := ""
-			if len(entry.Thumbnails) > 0 {
-				thumb = entry.Thumbnails[0].URL
-			}
-			tracks = append(tracks, songItem{
-				id:         entry.ID,
-				title:      entry.Title,
-				author:     entry.Author,
-				thumb:      thumb,
-				isAlbum:    false,
-				trackCount: 0,
-			})
-		}
-
-		return albumTracksFetchedMsg(tracks)
-	}
-}
-
 func (m *model) runDownloadAlbum() {
-	client := youtube.Client{}
-	
-	// Fetch all tracks from the playlist
-	// GetPlaylist expects a URL, so construct it from the playlist ID
-	playlistURL := "https://www.youtube.com/playlist?list=" + m.selected.id
-	playlist, err := client.GetPlaylist(playlistURL)
-	if err != nil {
-		m.program.Send(errMsg(err))
-		return
-	}
-
-	totalTracks := len(playlist.Videos)
-	if totalTracks == 0 {
+	if len(m.albumTracks) == 0 {
 		m.program.Send(errMsg(fmt.Errorf("no tracks found in album")))
 		return
 	}
 
-	// Create album directory
-	albumDir := strings.ReplaceAll(m.selected.title, "/", "_")
+	// Clean up album name for folder creation
+	albumName := m.currentAlbum.title
+	// Remove year from title if present
+	if strings.Contains(albumName, "(") && strings.Contains(albumName, ")") {
+		parts := strings.Split(albumName, "(")
+		albumName = strings.TrimSpace(parts[0])
+	}
+	// Remove "Topic" and other suffixes
+	albumName = strings.TrimSuffix(albumName, " - Topic")
+	albumName = strings.TrimSuffix(albumName, "Topic")
+	albumName = strings.TrimSpace(albumName)
+	
+	// Create safe folder name
+	albumDir := strings.ReplaceAll(albumName, "/", "_")
 	albumDir = strings.ReplaceAll(albumDir, "\\", "_")
-	err = os.MkdirAll(albumDir, 0755)
+	albumDir = strings.ReplaceAll(albumDir, ":", "_")
+	albumDir = strings.ReplaceAll(albumDir, "*", "_")
+	albumDir = strings.ReplaceAll(albumDir, "?", "_")
+	albumDir = strings.ReplaceAll(albumDir, "\"", "_")
+	albumDir = strings.ReplaceAll(albumDir, "<", "_")
+	albumDir = strings.ReplaceAll(albumDir, ">", "_")
+	albumDir = strings.ReplaceAll(albumDir, "|", "_")
+	
+	err := os.MkdirAll(albumDir, 0755)
 	if err != nil {
 		m.program.Send(errMsg(fmt.Errorf("failed to create album directory: %v", err)))
 		return
 	}
 
-	// Download album cover
+	totalTracks := len(m.albumTracks)
+	client := youtube.Client{}
+
+	// Download album cover if available
 	albumThumb := "temp_album_thumb.jpg"
-	err = m.downloadThumb(m.selected.thumb, albumThumb)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error downloading album thumb: %v\n", err)
+	if m.currentAlbum.thumb != "" {
+		err = m.downloadThumb(m.currentAlbum.thumb, albumThumb)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error downloading album thumb: %v\n", err)
+		}
 	}
 
-		// Download each track
-		for i, entry := range playlist.Videos {
-			m.program.Send(albumTrackProgressMsg{
-				current: i + 1,
-				total:   totalTracks,
-				title:   entry.Title,
-			})
-
-		// Get video details
-		videoDetails, err := client.GetVideo(entry.ID)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error getting video %s: %v\n", entry.ID, err)
+	// Download each track
+	for i, track := range m.albumTracks {
+		// Skip tracks with invalid IDs
+		if track.id == "" || len(track.id) < 10 {
 			continue
 		}
 
-		formats := videoDetails.Formats.Type("audio")
+		m.program.Send(albumTrackProgressMsg{
+			current: i + 1,
+			total:   totalTracks,
+			title:   track.title,
+		})
+
+		// Get track details
+		trackDetails, err := client.GetVideo(track.id)
+		if err != nil {
+			continue
+		}
+
+		formats := trackDetails.Formats.Type("audio")
 		if len(formats) == 0 {
-			fmt.Fprintf(os.Stderr, "No audio format found for %s\n", entry.Title)
 			continue
 		}
 		format := &formats[0]
 
 		tempAudio := fmt.Sprintf("temp_audio_%d", i)
-		finalName := fmt.Sprintf("%s/%02d - %s.mp3", albumDir, i+1, strings.ReplaceAll(videoDetails.Title, "/", "_"))
+		safeTitle := strings.ReplaceAll(trackDetails.Title, "/", "_")
+		safeTitle = strings.ReplaceAll(safeTitle, "\\", "_")
+		safeTitle = strings.ReplaceAll(safeTitle, ":", "_")
+		finalName := fmt.Sprintf("%s/%02d - %s.mp3", albumDir, i+1, safeTitle)
 
-		err = m.downloadFile(client, format, videoDetails, tempAudio, func(p float64) {
-			// Progress for individual track
-			m.program.Send(downloadProgressMsg(p))
+		err = m.downloadFile(client, format, trackDetails, tempAudio, func(p float64) {
+			// Calculate overall album progress: (completed tracks + current track progress) / total tracks
+			overallProgress := (float64(i) + p) / float64(totalTracks)
+			m.program.Send(downloadProgressMsg(overallProgress))
 		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error downloading %s: %v\n", entry.Title, err)
 			os.Remove(tempAudio)
 			continue
 		}
@@ -469,24 +528,39 @@ func (m *model) runDownloadAlbum() {
 		args := []string{
 			"-y",
 			"-i", tempAudio,
-			"-i", albumThumb,
-			"-map", "0:0",
-			"-map", "1:0",
+		}
+		
+		// Add album cover if available
+		if m.currentAlbum.thumb != "" {
+			args = append(args, "-i", albumThumb, "-map", "0:0", "-map", "1:0")
+		} else {
+			args = append(args, "-map", "0:0")
+		}
+		
+		args = append(args,
 			"-c:a", "libmp3lame",
 			"-q:a", "2",
 			"-id3v2_version", "3",
-			"-metadata:s:v", "title=\"Album cover\"",
-			"-metadata:s:v", "comment=\"Cover (Front)\"",
-			"-metadata", "title=" + videoDetails.Title,
-			"-metadata", "artist=" + videoDetails.Author,
-			"-metadata", "album=" + m.selected.title,
+		)
+		
+		// Add album cover metadata if available
+		if m.currentAlbum.thumb != "" {
+			args = append(args,
+				"-metadata:s:v", "title=\"Album cover\"",
+				"-metadata:s:v", "comment=\"Cover (Front)\"",
+			)
+		}
+		
+		args = append(args,
+			"-metadata", "title=" + trackDetails.Title,
+			"-metadata", "artist=" + trackDetails.Author,
+			"-metadata", "album=" + albumName,
 			"-metadata", "track=" + fmt.Sprintf("%d/%d", i+1, totalTracks),
 			finalName,
-		}
+		)
 
 		cmd := exec.Command("ffmpeg", args...)
 		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "FFmpeg failed for %s: %v\n", entry.Title, err)
 			os.Remove(tempAudio)
 			continue
 		}
@@ -494,7 +568,11 @@ func (m *model) runDownloadAlbum() {
 		os.Remove(tempAudio)
 	}
 
-	os.Remove(albumThumb)
+	// Clean up album thumb
+	if m.currentAlbum.thumb != "" {
+		os.Remove(albumThumb)
+	}
+	
 	m.program.Send(doneMsg(fmt.Sprintf("Album: %s (%d tracks)", albumDir, totalTracks)))
 }
 
@@ -538,11 +616,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if ok {
 					m.selected = item
 					if item.isAlbum {
-						// View album tracks instead of immediately downloading
+						// For albums, try to fetch tracks using the album title and artist
 						m.currentAlbum = item
 						m.state = stateSearching
-						return m, tea.Batch(m.spinner.Tick, fetchAlbumTracks(item.id))
+						
+						// Use enhanced album track search
+						return m, tea.Batch(m.spinner.Tick, searchAlbumWithTracks(item.title, item.author))
 					} else {
+						// Check if track has valid ID before downloading
+						if item.id == "" || len(item.id) < 10 {
+							return m, nil // Do nothing for invalid tracks
+						}
 						m.state = stateDownloading
 						go m.runDownloadConvert()
 					}
@@ -554,16 +638,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if ok {
 					// Skip if album header is selected
 					if item.isAlbum {
+						// Download the entire album
+						m.selected = m.currentAlbum
+						m.state = stateDownloadingAlbum
+						go m.runDownloadAlbum()
 						return m, nil
 					}
+					// Download individual track from album
 					m.stopPlayback() // Cleanup any existing playback first
 					// Find the original track (without tree prefix) from albumTracks
 					for _, origTrack := range m.albumTracks {
 						if origTrack.id == item.id {
+							// Check if track has valid ID before downloading
+							if origTrack.id == "" || len(origTrack.id) < 10 {
+								return m, nil // Do nothing for invalid tracks
+							}
 							m.selected = origTrack
-							m.state = stateLoading
-							go m.runInternalPlayback(origTrack)
-							return m, m.spinner.Tick
+							m.state = stateDownloading
+							go m.runDownloadConvert()
+							return m, nil
 						}
 					}
 				}
@@ -572,6 +665,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.state == stateSelecting {
 				item, ok := m.list.SelectedItem().(songItem)
 				if ok {
+					// Don't allow playing albums directly - only individual tracks
+					if item.isAlbum {
+						return m, nil // Do nothing for albums
+					}
+					
+					// Check if track has valid ID
+					if item.id == "" || len(item.id) < 10 {
+						return m, nil // Do nothing for invalid tracks
+					}
+					
 					m.stopPlayback() // Cleanup any existing playback first
 					m.selected = item
 					m.state = stateLoading
@@ -590,6 +693,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Find the original track (without tree prefix) from albumTracks
 					for _, origTrack := range m.albumTracks {
 						if origTrack.id == item.id {
+							// Check if track has valid ID
+							if origTrack.id == "" || len(origTrack.id) < 10 {
+								return m, nil // Do nothing for invalid tracks
+							}
 							m.selected = origTrack
 							m.state = stateLoading
 							go m.runInternalPlayback(origTrack)
@@ -694,6 +801,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			tea.Quit,
 		)
 
+	case imageReadyMsg:
+		// When image is ready, just store the path - don't display immediately
+		// Let the View function handle the display timing
+		if m.state == statePlaying {
+			m.playback.kittyImage = msg.imagePath
+		}
+		return m, nil
+
 	case playMsg:
 		m.playback.playingSong = fmt.Sprintf("%s - %s", msg.title, msg.author)
 		m.state = statePlaying
@@ -734,10 +849,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Create list of tracks for viewing with tree structure
 		var trackItems []list.Item
 		
-		// Add album header
+		// Add album header with download instruction
 		albumHeader := songItem{
 			id:      m.currentAlbum.id,
-			title:   fmt.Sprintf("📀 %s", m.currentAlbum.title),
+			title:   fmt.Sprintf("📀 %s (Press ENTER to download full album)", m.currentAlbum.title),
 			author:  m.currentAlbum.author,
 			isAlbum: true,
 		}
@@ -898,14 +1013,14 @@ func (m model) View() string {
 		return docStyle.Render(
 			lipgloss.JoinVertical(lipgloss.Left,
 				m.list.View(),
-				helpStyle.Render("\n  ENTER: View Album/Download  •  P: Play Integrated  •  Q: Quit"),
+				helpStyle.Render("\n  ENTER: Browse Album/Download Song  •  P: Play Song  •  Q: Quit"),
 			),
 		)
 	case stateViewingAlbumTracks:
 		return docStyle.Render(
 			lipgloss.JoinVertical(lipgloss.Left,
 				m.albumTrackList.View(),
-				helpStyle.Render("\n  ENTER: Play Track  •  P: Play Track  •  Q: Back to Albums  •  ESC: Back"),
+				helpStyle.Render("\n  ENTER: Download (Album header = Full Album, Track = Single)  •  P: Play Track  •  Q: Back  •  ESC: Back"),
 			),
 		)
 	case stateDownloading:
@@ -933,34 +1048,38 @@ func (m model) View() string {
 	case stateLoading:
 		s = fmt.Sprintf("\n  %s %s\n", m.spinner.View(), titleStyle.Render("Preparing stream..."))
 	case statePlaying:
-		// Simple animated wave visualizer
-		t := float64(time.Now().UnixNano()/1e7) / 10.0
-		wave := ""
-		width := 60
-		chars := []string{"▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"}
-		for i := 0; i < width; i++ {
-			p := float64(i) / float64(width)
-			h := math.Sin(p*math.Pi*2+t)*2.5 + math.Sin(p*math.Pi*4+t*1.5)*1.5 + math.Sin(p*math.Pi*8+t*2.5)*0.8
-			if m.playback.isPaused {
-				h = 0
-			}
-			idx := int((h + 4.8) / 9.6 * 8)
-			if idx < 0 {
-				idx = 0
-			}
-			if idx > 7 {
-				idx = 7
-			}
-			wave += chars[idx]
-		}
-		s = fmt.Sprintf(
-			"\n  %s\n\n  %s\n\n%s\n\n  %s\n\n  %s",
-			titleStyle.Render("Now Playing"),
-			statusStyle.Render(m.playback.playingSong),
+		// Create clean content
+		mainContent := fmt.Sprintf(
+			"%s\n\n%s\n\n%s",
+			titleStyle.Render("Now Playing: " + m.playback.playingSong),
 			m.renderLyrics(),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("63")).Render(wave),
 			helpStyle.Render("SPACE: Play/Pause  •  S: Stop  •  Q: Exit"),
 		)
+
+		// Check if we have ASCII art album cover
+		if m.playback.albumCover != "" {
+			// Display ASCII art album cover on the left
+			coverStyle := lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("63")).
+				Padding(0, 1)
+			
+			styledCover := coverStyle.Render(m.playback.albumCover)
+			
+			// Add info about the ASCII art
+			asciiInfo := helpStyle.Render("🎨  Colorized ASCII album art")
+			
+			// Join cover and main content horizontally
+			s = lipgloss.JoinHorizontal(
+				lipgloss.Top,
+				lipgloss.JoinVertical(lipgloss.Left, styledCover, asciiInfo),
+				"  ", // Spacing
+				mainContent,
+			)
+		} else {
+			// No cover available, show main content only
+			s = fmt.Sprintf("\n  %s", mainContent)
+		}
 	case stateError:
 		s = fmt.Sprintf("\n  %s\n\n  %v\n",
 			errorStyle.Render("Error"),
