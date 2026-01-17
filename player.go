@@ -41,13 +41,18 @@ func (m *model) runInternalPlayback(item songItem) {
 		return
 	}
 
-	// Use larger probesize and analyzeduration for better stream detection
+	// Use reconnect flags to handle network fluctuations
 	// Add user agent to prevent YouTube from throttling or closing the connection
 	cmd := exec.Command("ffmpeg",
 		"-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-		"-probesize", "10000000",
-		"-analyzeduration", "10000000",
+		"-reconnect", "1",
+		"-reconnect_at_eof", "1",
+		"-reconnect_streamed", "1",
+		"-reconnect_delay_max", "5",
+		"-probesize", "5000000",
+		"-analyzeduration", "5000000",
 		"-i", streamURL,
+		"-loglevel", "error",
 		"-vn", "-c:a", "libmp3lame",
 		"-ar", "44100",
 		"-ac", "2",
